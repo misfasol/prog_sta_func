@@ -1,0 +1,8 @@
+inc = (
+	1 +
+)
+
+main = (
+	1 2 ?(+) ! print pop
+	1 inc print pop
+)

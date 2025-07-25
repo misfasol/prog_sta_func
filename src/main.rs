@@ -1,0 +1,336 @@
+use std::collections::HashMap;
+use std::io::Write;
+use std::{env, fs, io, process};
+
+// ---------- Stack ----------
+
+#[derive(Debug)]
+pub struct Stack<T> {
+    lista: Vec<T>,
+}
+
+impl<T> Stack<T> {
+    pub fn new() -> Stack<T> {
+        Stack { lista: vec![] }
+    }
+
+    pub fn push(&mut self, valor: T) {
+        self.lista.push(valor);
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        self.lista.pop()
+    }
+
+    pub fn len(&self) -> usize {
+        self.lista.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lista.is_empty()
+    }
+}
+
+// ---------- Tokenizacao ----------
+
+#[derive(Debug)]
+pub enum Token {
+    // operadores
+    Igual,
+    ParenAbr,
+    ParenFec,
+    Interrogacao,
+    Exclamacao,
+    // funcoes builtin
+    Mais,  // soma 2 numeros
+    Print, // print
+    Pop,   // exclui topo da stack
+    Dup,   // duplica todo da stack
+    Swap,  // muda os dois ultimos itens da stack
+    // numeros e nomes
+    Numero(i32),
+    Simbolo(String),
+}
+
+fn tokenizar(entrada: &str) -> Vec<Token> {
+    let mut lista = vec![];
+
+    for palavra in entrada.split_whitespace() {
+        match palavra.trim() {
+            "=" => lista.push(Token::Igual),
+            "(" => lista.push(Token::ParenAbr),
+            ")" => lista.push(Token::ParenFec),
+            "?" => lista.push(Token::Interrogacao),
+            "!" => lista.push(Token::Exclamacao),
+
+            "+" => lista.push(Token::Mais),
+            "print" => lista.push(Token::Print),
+            "pop" => lista.push(Token::Pop),
+            "dup" => lista.push(Token::Dup),
+            "swap" => lista.push(Token::Swap),
+
+            outro => {
+                if let Ok(num) = outro.parse::<i32>() {
+                    lista.push(Token::Numero(num));
+                } else {
+                    lista.push(Token::Simbolo(String::from(outro)));
+                }
+            }
+        }
+    }
+    println!("tokens: {lista:?}");
+    lista
+}
+
+// ---------- AST ? ----------
+
+/*
+    [
+        (nome1, [ 1 2 func ?(1 +) ! ]),
+        (nome2, [ 3 4 + print ])
+    ]
+
+
+#[derive(Debug, Clone)]
+pub enum Item {
+    Mais,
+    Numero(i32),
+    FuncDef(FuncDefUnnamed),
+    FuncCallNamed(String),
+    FuncCallUnnamed(FuncDefUnnamed),
+    CallTop,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code, unused)]
+pub struct FuncDefUnnamed(Vec<Item>);
+
+#[derive(Debug)]
+#[allow(dead_code, unused)]
+pub struct FuncDefNamed(String, FuncDefUnnamed);
+
+type AST = Vec<FuncDefNamed>;
+
+*/
+
+#[derive(Debug, Clone)]
+pub enum Item {
+    Mais,
+    Print,
+    Numero(i32),
+    FuncDef(Func),
+    FuncCallNamed(String),
+    FuncCallTop,
+}
+
+type Func = Vec<Item>;
+
+type AST = Vec<(String, Func)>;
+
+fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
+    let mut funcao_atual: Func = vec![];
+    let mut stack_funcoes: Stack<Func> = Stack::new();
+    let mut criando_funcao = false;
+
+    loop {
+        if *i == tokens.len() {
+            break;
+        }
+        let atual = &tokens[*i];
+        // println!("atual: {:?}, i: {}", atual, *i);
+        *i += 1;
+        match atual {
+            Token::ParenAbr => {
+                if criando_funcao {
+                    criando_funcao = false;
+                    stack_funcoes.push(funcao_atual.to_vec());
+                    funcao_atual.clear();
+                } else {
+                    println!("parenteses sem ter interrogacao antes");
+                    process::exit(1);
+                }
+            }
+            Token::ParenFec => {
+                if stack_funcoes.is_empty() {
+                    *i -= 1;
+                    break;
+                } else {
+                    let f = funcao_atual.to_vec();
+                    funcao_atual = match stack_funcoes.pop() {
+                        Some(f) => f,
+                        None => {
+                            println!("erro no parenfec");
+                            process::exit(1);
+                        }
+                    };
+                    funcao_atual.push(Item::FuncDef(f));
+                }
+            }
+            Token::Interrogacao => {
+                criando_funcao = true;
+            }
+            Token::Exclamacao => {
+                funcao_atual.push(Item::FuncCallTop);
+            }
+            Token::Mais => {
+                funcao_atual.push(Item::Mais);
+            }
+            Token::Print => {
+                funcao_atual.push(Item::Print);
+            }
+            Token::Pop => todo!(),
+            Token::Dup => todo!(),
+            Token::Swap => todo!(),
+            Token::Numero(n) => {
+                funcao_atual.push(Item::Numero(*n));
+            }
+            Token::Simbolo(nome) => {
+                funcao_atual.push(Item::FuncCallNamed(nome.to_string()));
+            }
+            Token::Igual => {
+                println!("impossível ter igual dentro de uma funcao");
+                process::exit(1);
+            }
+        }
+    }
+
+    funcao_atual
+}
+
+fn gerar_ast(tokens: Vec<Token>, funcao: bool) -> AST {
+    let mut ast = vec![];
+    let mut i: usize = 0;
+
+    if funcao {
+        ast.push((String::from("funcao"), gerar_ast_funcao(&tokens, &mut i)));
+    } else {
+        loop {
+            if i == tokens.len() {
+                break;
+            }
+            let Token::Simbolo(nome) = &tokens[i] else {
+                println!("falta nome no começo de uma funcao");
+                process::exit(1);
+            };
+            i += 1;
+            let Token::Igual = &tokens[i] else {
+                println!("falta um igual na definicao da funcao {nome}");
+                process::exit(1);
+            };
+            i += 1;
+            let Token::ParenAbr = &tokens[i] else {
+                println!("falta um parenteses no comeco da funcao {nome}");
+                process::exit(1);
+            };
+            i += 1;
+            let func = gerar_ast_funcao(&tokens, &mut i);
+            let Token::ParenFec = &tokens[i] else {
+                println!("falta um parenteses no final da funcao {nome}");
+                process::exit(1);
+            };
+            i += 1;
+            ast.push((nome.to_string(), func));
+        }
+    }
+
+    println!("ast: {ast:?}");
+
+    ast
+}
+
+// ---------- Helpers ----------
+
+fn tokenizar_e_gerar_ast(entrada: &str, funcao: bool) -> AST {
+    gerar_ast(tokenizar(entrada), funcao)
+}
+
+// ---------- Estado ----------
+
+#[derive(Debug)]
+pub struct PSFState {
+    #[allow(dead_code, unused)]
+    stack: Stack<Item>,
+    #[allow(dead_code, unused)]
+    funcoes: HashMap<String, Item>,
+}
+
+impl PSFState {
+    pub fn new() -> PSFState {
+        PSFState {
+            stack: Stack::new(),
+            funcoes: HashMap::new(),
+        }
+    }
+
+    pub fn clear_stack(&mut self) {
+        self.stack.lista.clear();
+    }
+
+    #[allow(dead_code, unused)]
+    pub fn load_ast(&mut self, ast: AST) {}
+
+    #[allow(dead_code, unused)]
+    pub fn load_raw_string(&mut self, entrada: &str) {
+        let itens = tokenizar_e_gerar_ast(entrada, true);
+        todo!("tem que fazer a funcao load_raw_string");
+    }
+
+    #[allow(dead_code, unused)]
+    pub fn load_string(&mut self, entrada: &str) {
+        let itens = tokenizar_e_gerar_ast(entrada, false);
+        todo!("tem que fazer a funcao load_string");
+    }
+
+    #[allow(dead_code, unused)]
+    pub fn run_function(&mut self, f: &str) {
+        todo!("tem que fazer a funcao run_function");
+    }
+
+    pub fn run_main(&mut self) {
+        self.run_function("main");
+    }
+}
+
+// ---------- Main ----------
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let mut estado = PSFState::new();
+
+    if args.len() == 1 {
+        // repl
+        let mut input = String::new();
+        loop {
+            print!("> ");
+            let _ = io::stdout().flush();
+            io::stdin().read_line(&mut input).unwrap();
+            input = input.trim().to_owned();
+
+            match input.as_str() {
+                ":e" | ":exit" => {
+                    return;
+                }
+                outro => {
+                    estado.load_raw_string(outro);
+                    println!("{:?}", estado.stack);
+                    estado.clear_stack();
+                }
+            }
+            input.clear();
+        }
+    } else if args.len() == 2 {
+        // ler arquivo
+        let conteudo = match fs::read_to_string(&args[1]) {
+            Err(erro) => {
+                println!("Erro abrindo arquivo: {}", erro);
+                return;
+            }
+            Ok(str) => str,
+        };
+        estado.load_string(&conteudo);
+        estado.run_main();
+    } else {
+        println!("3 nao existe");
+        return;
+    }
+}
