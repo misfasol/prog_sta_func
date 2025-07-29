@@ -3,6 +3,16 @@ inc = (
 )
 
 main = (
-	1 2 ?(+) ! print pop
-	1 inc print pop
+	1 2 ? ( + ) ! print
+	1
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
+	inc print
 )

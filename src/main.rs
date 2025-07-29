@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
-use std::{env, fs, io, process};
+use std::{env, fs, io, process, str};
 
 // ---------- Stack ----------
 
@@ -78,7 +78,7 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
             }
         }
     }
-    println!("tokens: {lista:?}");
+    // println!("tokens: {lista:?}");
     lista
 }
 
@@ -90,31 +90,10 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
         (nome2, [ 3 4 + print ])
     ]
 
-
-#[derive(Debug, Clone)]
-pub enum Item {
-    Mais,
-    Numero(i32),
-    FuncDef(FuncDefUnnamed),
-    FuncCallNamed(String),
-    FuncCallUnnamed(FuncDefUnnamed),
-    CallTop,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code, unused)]
-pub struct FuncDefUnnamed(Vec<Item>);
-
-#[derive(Debug)]
-#[allow(dead_code, unused)]
-pub struct FuncDefNamed(String, FuncDefUnnamed);
-
-type AST = Vec<FuncDefNamed>;
-
 */
 
 #[derive(Debug, Clone)]
-pub enum Item {
+pub enum ASTItem {
     Mais,
     Print,
     Numero(i32),
@@ -123,7 +102,7 @@ pub enum Item {
     FuncCallTop,
 }
 
-type Func = Vec<Item>;
+type Func = Vec<ASTItem>;
 
 type AST = Vec<(String, Func)>;
 
@@ -137,7 +116,6 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
             break;
         }
         let atual = &tokens[*i];
-        // println!("atual: {:?}, i: {}", atual, *i);
         *i += 1;
         match atual {
             Token::ParenAbr => {
@@ -163,29 +141,29 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
                             process::exit(1);
                         }
                     };
-                    funcao_atual.push(Item::FuncDef(f));
+                    funcao_atual.push(ASTItem::FuncDef(f));
                 }
             }
             Token::Interrogacao => {
                 criando_funcao = true;
             }
             Token::Exclamacao => {
-                funcao_atual.push(Item::FuncCallTop);
+                funcao_atual.push(ASTItem::FuncCallTop);
             }
             Token::Mais => {
-                funcao_atual.push(Item::Mais);
+                funcao_atual.push(ASTItem::Mais);
             }
             Token::Print => {
-                funcao_atual.push(Item::Print);
+                funcao_atual.push(ASTItem::Print);
             }
             Token::Pop => todo!(),
             Token::Dup => todo!(),
             Token::Swap => todo!(),
             Token::Numero(n) => {
-                funcao_atual.push(Item::Numero(*n));
+                funcao_atual.push(ASTItem::Numero(*n));
             }
             Token::Simbolo(nome) => {
-                funcao_atual.push(Item::FuncCallNamed(nome.to_string()));
+                funcao_atual.push(ASTItem::FuncCallNamed(nome.to_string()));
             }
             Token::Igual => {
                 println!("impossível ter igual dentro de uma funcao");
@@ -233,15 +211,101 @@ fn gerar_ast(tokens: Vec<Token>, funcao: bool) -> AST {
         }
     }
 
-    println!("ast: {ast:?}");
+    // println!("ast: {ast:?}");
 
     ast
 }
 
-// ---------- Helpers ----------
-
 fn tokenizar_e_gerar_ast(entrada: &str, funcao: bool) -> AST {
     gerar_ast(tokenizar(entrada), funcao)
+}
+
+// ---------- Interpretacao ----------
+
+#[derive(Debug, Clone)]
+#[allow(unused)]
+pub enum Item {
+    Numero(i32),
+    Func(Vec<ASTItem>),
+}
+
+pub fn interpretar_func(estado: &mut PSFState, func: Func) {
+    let mut stack_consumir = Stack::new();
+    for item in func.iter().rev() {
+        stack_consumir.push(item.clone());
+    }
+    let mut item: ASTItem;
+    loop {
+        if estado.stack.len() > 1000 {
+            println!("stack muito grande, terminando programa");
+            process::exit(1);
+        }
+        item = match stack_consumir.pop() {
+            Some(i) => i,
+            None => break,
+        };
+        match item {
+            ASTItem::Numero(n) => {
+                estado.stack.push(Item::Numero(n));
+            }
+            ASTItem::Mais => {
+                let Some(Item::Numero(n1)) = estado.stack.pop() else {
+                    println!("tipo do primeiro argumento nao e numero");
+                    process::exit(1);
+                };
+                let Some(Item::Numero(n2)) = estado.stack.pop() else {
+                    println!("tipo do segundo argumento nao e numero");
+                    process::exit(1);
+                };
+                estado.stack.push(Item::Numero(n1 + n2));
+            }
+            ASTItem::Print => {
+                let Some(item) = estado.stack.pop() else {
+                    println!("stack vazia antes do print");
+                    process::exit(1);
+                };
+                estado.stack.push(item.clone());
+                match item {
+                    Item::Numero(n) => {
+                        println!("{n}");
+                    }
+                    // Item::Mais => todo!(),
+                    // Item::Print => todo!(),
+                    // Item::FuncDef(items) => todo!(),
+                    // Item::FuncCallNamed(_) => todo!(),
+                    // Item::FuncCallTop => todo!(),
+                    outro => {
+                        println!("impossivel: {:?}", outro);
+                    }
+                }
+            }
+            ASTItem::FuncDef(f) => {
+                estado.stack.push(Item::Func(f));
+            }
+            ASTItem::FuncCallTop => {
+                let Some(f) = estado.stack.pop() else {
+                    println!("tentativa de chamar topo da funcao mas nao tem item");
+                    process::exit(1);
+                };
+                let Item::Func(f) = f else {
+                    println!("topo da funcao nao é funcao");
+                    process::exit(1);
+                };
+                for i in f.iter().rev() {
+                    stack_consumir.push(i.clone());
+                }
+            }
+            ASTItem::FuncCallNamed(f) => {
+                let Some(f) = estado.funcoes.get(&f) else {
+                    println!("funcao `{:?}` nao existe", f);
+                    process::exit(1);
+                };
+                for i in f.iter().rev() {
+                    stack_consumir.push(i.clone());
+                }
+            }
+        }
+    }
 }
 
 // ---------- Estado ----------
@@ -251,7 +315,7 @@ pub struct PSFState {
     #[allow(dead_code, unused)]
     stack: Stack<Item>,
     #[allow(dead_code, unused)]
-    funcoes: HashMap<String, Item>,
+    funcoes: HashMap<String, Func>,
 }
 
 impl PSFState {
@@ -267,23 +331,29 @@ impl PSFState {
     }
 
     #[allow(dead_code, unused)]
-    pub fn load_ast(&mut self, ast: AST) {}
-
-    #[allow(dead_code, unused)]
-    pub fn load_raw_string(&mut self, entrada: &str) {
-        let itens = tokenizar_e_gerar_ast(entrada, true);
-        todo!("tem que fazer a funcao load_raw_string");
+    pub fn load_ast(&mut self, ast: AST) {
+        for (nome, funcao) in ast {
+            self.funcoes.insert(nome, funcao);
+        }
     }
 
     #[allow(dead_code, unused)]
     pub fn load_string(&mut self, entrada: &str) {
-        let itens = tokenizar_e_gerar_ast(entrada, false);
-        todo!("tem que fazer a funcao load_string");
+        self.load_ast(tokenizar_e_gerar_ast(entrada, false));
     }
 
     #[allow(dead_code, unused)]
+    pub fn run_raw_string(&mut self, entrada: &str) {
+        let itens = tokenizar_e_gerar_ast(entrada, true);
+        let (_, funcao) = itens.get(0).unwrap();
+        interpretar_func(self, funcao.to_vec());
+    }
+
     pub fn run_function(&mut self, f: &str) {
-        todo!("tem que fazer a funcao run_function");
+        interpretar_func(
+            self,
+            self.funcoes.get(f).expect("funcao nao existe").to_vec(),
+        );
     }
 
     pub fn run_main(&mut self) {
@@ -311,8 +381,8 @@ fn main() {
                     return;
                 }
                 outro => {
-                    estado.load_raw_string(outro);
-                    println!("{:?}", estado.stack);
+                    estado.run_raw_string(outro);
+                    // println!("{:?}", estado.stack);
                     estado.clear_stack();
                 }
             }
