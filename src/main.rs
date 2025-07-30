@@ -2,6 +2,23 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::{env, fs, io, process, str};
 
+// ---------- Logging ----------
+
+fn log_info(msg: &str) {
+    println!("info: {}", msg);
+}
+
+macro_rules! log_error {
+    () => {
+        println!("\x1b[1;31merro\x1b[0m");
+    };
+    ( $($arg:tt)* ) => {
+        print!("\x1b[1;31merro\x1b[0m: ");
+        println!($($arg)*);
+        std::process::exit(1);
+    };
+}
+
 // ---------- Stack ----------
 
 #[derive(Debug)]
@@ -53,33 +70,104 @@ pub enum Token {
 }
 
 fn tokenizar(entrada: &str) -> Vec<Token> {
-    let mut lista = vec![];
+    let mut tokens = vec![];
 
-    for palavra in entrada.split_whitespace() {
-        match palavra.trim() {
-            "=" => lista.push(Token::Igual),
-            "(" => lista.push(Token::ParenAbr),
-            ")" => lista.push(Token::ParenFec),
-            "?" => lista.push(Token::Interrogacao),
-            "!" => lista.push(Token::Exclamacao),
+    let mut buffer = String::new();
+    let mut enumero = false;
 
-            "+" => lista.push(Token::Mais),
-            "print" => lista.push(Token::Print),
-            "pop" => lista.push(Token::Pop),
-            "dup" => lista.push(Token::Dup),
-            "swap" => lista.push(Token::Swap),
+    for c in entrada.chars() {
+        if !buffer.is_empty() {
+            if enumero {
+                match c {
+                    c @ '0'..'9' => {
+                        buffer.push(c);
+                    }
+                    c if c.is_alphabetic() => {
+                        // println!("nao pode letra dps de numero: {:?}", c);
+                        // process::exit(1);
+                        log_error!("nao pode letra dps de numero: {:?}", c);
+                    }
+                    _ => {
+                        tokens.push(Token::Numero(
+                            buffer.parse().expect("nunca deveria dar erro"),
+                        ));
+                        enumero = false;
+                        buffer.clear();
+                    }
+                }
+            } else {
+                match c {
+                    c if (c.is_alphabetic() | c.is_digit(10)) => {
+                        buffer.push(c);
+                    }
+                    _ => {
+                        tokens.push(Token::Simbolo(String::from(&buffer)));
+                        buffer.clear();
+                    }
+                }
+            }
+        } else {
+            match c {
+                '=' => tokens.push(Token::Igual),
+                '(' => tokens.push(Token::ParenAbr),
+                ')' => tokens.push(Token::ParenFec),
+                '?' => tokens.push(Token::Interrogacao),
+                '!' => tokens.push(Token::Exclamacao),
+                '+' => tokens.push(Token::Mais),
 
-            outro => {
-                if let Ok(num) = outro.parse::<i32>() {
-                    lista.push(Token::Numero(num));
-                } else {
-                    lista.push(Token::Simbolo(String::from(outro)));
+                c if c.is_digit(10) => {
+                    buffer.push(c);
+                    enumero = true;
+                }
+                c if c.is_alphabetic() => {
+                    buffer.push(c);
+                    enumero = false;
+                }
+                c if c.is_whitespace() => (),
+                outro => {
+                    println!("nao sei: {:?}", outro);
+                    process::exit(1);
                 }
             }
         }
     }
-    // println!("tokens: {lista:?}");
-    lista
+
+    if !buffer.is_empty() {
+        if enumero {
+            tokens.push(Token::Numero(
+                buffer.parse().expect("nao deveria dar errado"),
+            ));
+        } else {
+            tokens.push(Token::Simbolo(String::from(&buffer)));
+        }
+    }
+
+    // for palavra in entrada.split_whitespace() {
+    //     match palavra.trim() {
+    //         "=" => tokens.push(Token::Igual),
+    //         "(" => tokens.push(Token::ParenAbr),
+    //         ")" => tokens.push(Token::ParenFec),
+    //         "?" => tokens.push(Token::Interrogacao),
+    //         "!" => tokens.push(Token::Exclamacao),
+
+    //         "+" => tokens.push(Token::Mais),
+    //         "print" => tokens.push(Token::Print),
+    //         "pop" => tokens.push(Token::Pop),
+    //         "dup" => tokens.push(Token::Dup),
+    //         "swap" => tokens.push(Token::Swap),
+
+    //         outro => {
+    //             if let Ok(num) = outro.parse::<i32>() {
+    //                 tokens.push(Token::Numero(num));
+    //             } else {
+    //                 tokens.push(Token::Simbolo(String::from(outro)));
+    //             }
+    //         }
+    //     }
+    // }
+    println!("tokens: {:?}", tokens);
+    process::exit(1);
+    tokens
 }
 
 // ---------- AST ? ----------
@@ -364,6 +452,7 @@ impl PSFState {
 // ---------- Main ----------
 
 fn main() {
+    log_error!("oi: {}", 5);
     let args: Vec<String> = env::args().collect();
     let mut estado = PSFState::new();
 
