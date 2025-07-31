@@ -1,22 +1,26 @@
 use std::collections::HashMap;
 use std::io::Write;
-use std::{env, fs, io, process, str};
+use std::{env, fs, io, str};
 
 // ---------- Logging ----------
 
-fn log_info(msg: &str) {
-    println!("info: {}", msg);
+#[allow(unused)]
+macro_rules! log_info {
+    ( $($arg:tt)* ) => {
+        print!("\x1b[1;34minfo\x1b[0m: ");
+        println!($($arg)*);
+    };
 }
 
 macro_rules! log_error {
     () => {
         println!("\x1b[1;31merro\x1b[0m");
     };
-    ( $($arg:tt)* ) => {
+    ( $($arg:tt)* ) => {{
         print!("\x1b[1;31merro\x1b[0m: ");
         println!($($arg)*);
-        std::process::exit(1);
-    };
+        std::process::exit(0);
+    }};
 }
 
 // ---------- Stack ----------
@@ -58,13 +62,12 @@ pub enum Token {
     ParenFec,
     Interrogacao,
     Exclamacao,
-    // funcoes builtin
-    Mais,  // soma 2 numeros
-    Print, // print
-    Pop,   // exclui topo da stack
-    Dup,   // duplica todo da stack
-    Swap,  // muda os dois ultimos itens da stack
+    Mais,
+    // Menor,
+    // Maior,
+    // Comp,
     // numeros e nomes
+    // keywords sao reconhecidas na criacao da ast mas queria ter feito aq
     Numero(i32),
     Simbolo(String),
 }
@@ -79,18 +82,17 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
         if !buffer.is_empty() {
             if enumero {
                 match c {
-                    c @ '0'..'9' => {
+                    c if c.is_digit(10) => {
                         buffer.push(c);
                     }
                     c if c.is_alphabetic() => {
-                        // println!("nao pode letra dps de numero: {:?}", c);
-                        // process::exit(1);
                         log_error!("nao pode letra dps de numero: {:?}", c);
                     }
                     _ => {
-                        tokens.push(Token::Numero(
-                            buffer.parse().expect("nunca deveria dar erro"),
-                        ));
+                        tokens.push(Token::Numero(match buffer.parse() {
+                            Ok(n) => n,
+                            Err(err) => log_error!("{}", err),
+                        }));
                         enumero = false;
                         buffer.clear();
                     }
@@ -101,6 +103,14 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
                         buffer.push(c);
                     }
                     _ => {
+                        // match &buffer[..] {
+                        //     "true" => tokens.push(Token::True),
+                        //     "false" => tokens.push(Token::False),
+                        //     _ => {
+                        //         log_info!("ta: {}", buffer);
+                        //         tokens.push(Token::Simbolo(String::from(&buffer)));
+                        //     }
+                        // }
                         tokens.push(Token::Simbolo(String::from(&buffer)));
                         buffer.clear();
                     }
@@ -125,8 +135,7 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
                 }
                 c if c.is_whitespace() => (),
                 outro => {
-                    println!("nao sei: {:?}", outro);
-                    process::exit(1);
+                    log_error!("nao sei: {:?}", outro);
                 }
             }
         }
@@ -134,39 +143,15 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
 
     if !buffer.is_empty() {
         if enumero {
-            tokens.push(Token::Numero(
-                buffer.parse().expect("nao deveria dar errado"),
-            ));
+            tokens.push(Token::Numero(match buffer.parse() {
+                Ok(n) => n,
+                Err(err) => log_error!("nao deveria dar errado: {}", err),
+            }));
         } else {
             tokens.push(Token::Simbolo(String::from(&buffer)));
         }
     }
-
-    // for palavra in entrada.split_whitespace() {
-    //     match palavra.trim() {
-    //         "=" => tokens.push(Token::Igual),
-    //         "(" => tokens.push(Token::ParenAbr),
-    //         ")" => tokens.push(Token::ParenFec),
-    //         "?" => tokens.push(Token::Interrogacao),
-    //         "!" => tokens.push(Token::Exclamacao),
-
-    //         "+" => tokens.push(Token::Mais),
-    //         "print" => tokens.push(Token::Print),
-    //         "pop" => tokens.push(Token::Pop),
-    //         "dup" => tokens.push(Token::Dup),
-    //         "swap" => tokens.push(Token::Swap),
-
-    //         outro => {
-    //             if let Ok(num) = outro.parse::<i32>() {
-    //                 tokens.push(Token::Numero(num));
-    //             } else {
-    //                 tokens.push(Token::Simbolo(String::from(outro)));
-    //             }
-    //         }
-    //     }
-    // }
-    println!("tokens: {:?}", tokens);
-    process::exit(1);
+    // log_info!("tokens: {:?}", tokens);
     tokens
 }
 
@@ -182,8 +167,17 @@ fn tokenizar(entrada: &str) -> Vec<Token> {
 
 #[derive(Debug, Clone)]
 pub enum ASTItem {
+    // operadores
     Mais,
+    // builins
     Print,
+    Pop,
+    Dup,
+    Swap,
+    // literais
+    True,
+    False,
+    // funcoes
     Numero(i32),
     FuncDef(Func),
     FuncCallNamed(String),
@@ -212,8 +206,7 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
                     stack_funcoes.push(funcao_atual.to_vec());
                     funcao_atual.clear();
                 } else {
-                    println!("parenteses sem ter interrogacao antes");
-                    process::exit(1);
+                    log_error!("parenteses sem ter interrogacao antes");
                 }
             }
             Token::ParenFec => {
@@ -225,8 +218,7 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
                     funcao_atual = match stack_funcoes.pop() {
                         Some(f) => f,
                         None => {
-                            println!("erro no parenfec");
-                            process::exit(1);
+                            log_error!("erro no parenfec");
                         }
                     };
                     funcao_atual.push(ASTItem::FuncDef(f));
@@ -241,21 +233,26 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
             Token::Mais => {
                 funcao_atual.push(ASTItem::Mais);
             }
-            Token::Print => {
-                funcao_atual.push(ASTItem::Print);
-            }
-            Token::Pop => todo!(),
-            Token::Dup => todo!(),
-            Token::Swap => todo!(),
+            // Token::True => {
+            //     funcao_atual.push(ASTItem::True);
+            // }
+            // Token::False => {
+            //     funcao_atual.push(ASTItem::False);
+            // }
             Token::Numero(n) => {
                 funcao_atual.push(ASTItem::Numero(*n));
             }
-            Token::Simbolo(nome) => {
-                funcao_atual.push(ASTItem::FuncCallNamed(nome.to_string()));
-            }
+            Token::Simbolo(nome) => match &nome[..] {
+                "print" => funcao_atual.push(ASTItem::Print),
+                "pop" => funcao_atual.push(ASTItem::Pop),
+                "dup" => funcao_atual.push(ASTItem::Dup),
+                "swap" => funcao_atual.push(ASTItem::Swap),
+                "true" => funcao_atual.push(ASTItem::True),
+                "false" => funcao_atual.push(ASTItem::False),
+                _ => funcao_atual.push(ASTItem::FuncCallNamed(nome.to_string())),
+            },
             Token::Igual => {
-                println!("impossível ter igual dentro de uma funcao");
-                process::exit(1);
+                log_error!("impossível ter igual dentro de uma funcao");
             }
         }
     }
@@ -275,24 +272,20 @@ fn gerar_ast(tokens: Vec<Token>, funcao: bool) -> AST {
                 break;
             }
             let Token::Simbolo(nome) = &tokens[i] else {
-                println!("falta nome no começo de uma funcao");
-                process::exit(1);
+                log_error!("falta nome no começo de uma funcao");
             };
             i += 1;
             let Token::Igual = &tokens[i] else {
-                println!("falta um igual na definicao da funcao {nome}");
-                process::exit(1);
+                log_error!("falta um igual na definicao da funcao {}", nome);
             };
             i += 1;
             let Token::ParenAbr = &tokens[i] else {
-                println!("falta um parenteses no comeco da funcao {nome}");
-                process::exit(1);
+                log_error!("falta um parenteses no comeco da funcao {}", nome);
             };
             i += 1;
             let func = gerar_ast_funcao(&tokens, &mut i);
             let Token::ParenFec = &tokens[i] else {
-                println!("falta um parenteses no final da funcao {nome}");
-                process::exit(1);
+                log_error!("falta um parenteses no final da funcao {}", nome);
             };
             i += 1;
             ast.push((nome.to_string(), func));
@@ -313,6 +306,7 @@ fn tokenizar_e_gerar_ast(entrada: &str, funcao: bool) -> AST {
 #[derive(Debug, Clone)]
 #[allow(unused)]
 pub enum Item {
+    Bool(bool),
     Numero(i32),
     Func(Vec<ASTItem>),
 }
@@ -325,59 +319,74 @@ pub fn interpretar_func(estado: &mut PSFState, func: Func) {
     let mut item: ASTItem;
     loop {
         if estado.stack.len() > 1000 {
-            println!("stack muito grande, terminando programa");
-            process::exit(1);
+            log_error!("stack muito grande, terminando programa");
         }
         item = match stack_consumir.pop() {
             Some(i) => i,
             None => break,
         };
         match item {
+            ASTItem::True => {
+                estado.stack.push(Item::Bool(true));
+            }
+            ASTItem::False => {
+                estado.stack.push(Item::Bool(false));
+            }
             ASTItem::Numero(n) => {
                 estado.stack.push(Item::Numero(n));
             }
             ASTItem::Mais => {
                 let Some(Item::Numero(n1)) = estado.stack.pop() else {
-                    println!("tipo do primeiro argumento nao e numero");
-                    process::exit(1);
+                    log_error!("tipo do primeiro argumento nao e numero");
                 };
                 let Some(Item::Numero(n2)) = estado.stack.pop() else {
-                    println!("tipo do segundo argumento nao e numero");
-                    process::exit(1);
+                    log_error!("tipo do segundo argumento nao e numero");
                 };
                 estado.stack.push(Item::Numero(n1 + n2));
             }
             ASTItem::Print => {
                 let Some(item) = estado.stack.pop() else {
-                    println!("stack vazia antes do print");
-                    process::exit(1);
+                    log_error!("stack vazia antes do print");
                 };
                 estado.stack.push(item.clone());
                 match item {
-                    Item::Numero(n) => {
-                        println!("{n}");
-                    }
-                    // Item::Mais => todo!(),
-                    // Item::Print => todo!(),
-                    // Item::FuncDef(items) => todo!(),
-                    // Item::FuncCallNamed(_) => todo!(),
-                    // Item::FuncCallTop => todo!(),
+                    Item::Numero(n) => println!("{}", n),
+
+                    Item::Bool(b) => println!("{}", b),
                     outro => {
                         println!("impossivel: {:?}", outro);
                     }
                 }
+            }
+            ASTItem::Pop => {
+                _ = estado.stack.pop();
+            }
+            ASTItem::Dup => {
+                let Some(topo) = estado.stack.pop() else {
+                    log_error!("stack vazia na chamada do dup");
+                };
+                estado.stack.push(topo.clone());
+                estado.stack.push(topo);
+            }
+            ASTItem::Swap => {
+                let Some(prim) = estado.stack.pop() else {
+                    log_error!("stack vazia na chamada do swap");
+                };
+                let Some(seg) = estado.stack.pop() else {
+                    log_error!("stack com somente um elemento na chamada do swap");
+                };
+                estado.stack.push(prim);
+                estado.stack.push(seg);
             }
             ASTItem::FuncDef(f) => {
                 estado.stack.push(Item::Func(f));
             }
             ASTItem::FuncCallTop => {
                 let Some(f) = estado.stack.pop() else {
-                    println!("tentativa de chamar topo da funcao mas nao tem item");
-                    process::exit(1);
+                    log_error!("tentativa de chamar topo da funcao mas nao tem item");
                 };
                 let Item::Func(f) = f else {
-                    println!("topo da funcao nao é funcao");
-                    process::exit(1);
+                    log_error!("topo da funcao nao é funcao");
                 };
                 for i in f.iter().rev() {
                     stack_consumir.push(i.clone());
@@ -385,8 +394,7 @@ pub fn interpretar_func(estado: &mut PSFState, func: Func) {
             }
             ASTItem::FuncCallNamed(f) => {
                 let Some(f) = estado.funcoes.get(&f) else {
-                    println!("funcao `{:?}` nao existe", f);
-                    process::exit(1);
+                    log_error!("funcao `{:?}` nao existe", f);
                 };
                 for i in f.iter().rev() {
                     stack_consumir.push(i.clone());
@@ -452,7 +460,6 @@ impl PSFState {
 // ---------- Main ----------
 
 fn main() {
-    log_error!("oi: {}", 5);
     let args: Vec<String> = env::args().collect();
     let mut estado = PSFState::new();
 
@@ -471,7 +478,7 @@ fn main() {
                 }
                 outro => {
                     estado.run_raw_string(outro);
-                    // println!("{:?}", estado.stack);
+                    log_info!("stack: {:?}", estado.stack.lista);
                     estado.clear_stack();
                 }
             }
