@@ -3,7 +3,7 @@ inc = (
 )
 
 main = (
-	1 2 ? ( + ) ! print
+	1 2 ?(+) ! print
 	1
 	inc print
 	inc print

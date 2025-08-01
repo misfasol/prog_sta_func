@@ -1,0 +1,17 @@
+main = (
+    1 2 <
+        ?(1 print)
+        ?(2 print)
+    if
+
+    swap pop swap pop
+
+    4 8 >
+        ?(4 print)
+        ?(8 print)
+    if
+
+    swap pop swap pop
+
+    + print
+)

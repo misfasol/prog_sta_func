@@ -1,0 +1,14 @@
+inc = (
+    1 +
+)
+
+desc = (
+    1000000 <
+        ?(pop inc desc)
+        ?()
+    if
+)
+
+main = (
+    0 desc 123 print
+)

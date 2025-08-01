@@ -1,0 +1,5 @@
+main = (
+    "primeira string" print
+    "segunda string" print
+    pop print
+)
