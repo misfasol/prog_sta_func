@@ -6,6 +6,7 @@ use std::{env, fs, io, str};
 
 // - tokens de mais de 1 simbolo como == <= >= !=
 // - criacao de listas com []
+// - pensar em criacao de structs
 
 // ---------- Logging ----------
 
@@ -18,9 +19,10 @@ macro_rules! log_info {
 }
 
 macro_rules! log_error {
-    () => {
-        println!("\x1b[1;31merro\x1b[0m");
-    };
+    // () => {
+    //     println!("\x1b[1;31merro\x1b[0m");
+    //     std::process::exit(0);
+    // };
     ( $($arg:tt)* ) => {{
         print!("\x1b[1;31merro\x1b[0m: ");
         println!($($arg)*);
@@ -197,12 +199,14 @@ pub enum ASTItem {
     Menor,
     // funcoes builin
     Print,
+    Input,
     Pop,
     Dup,
     Swap,
     SwapN,
     SSize,
     If,
+    DebugS,
     // literais
     True,
     False,
@@ -274,12 +278,14 @@ fn gerar_ast_funcao(tokens: &Vec<Token>, i: &mut usize) -> Func {
             }
             Token::Simbolo(nome) => match nome.as_str() {
                 "print" => funcao_atual.push(ASTItem::Print),
+                "input" => funcao_atual.push(ASTItem::Input),
                 "pop" => funcao_atual.push(ASTItem::Pop),
                 "dup" => funcao_atual.push(ASTItem::Dup),
                 "swap" => funcao_atual.push(ASTItem::Swap),
                 "swapn" => funcao_atual.push(ASTItem::SwapN),
                 "ssize" => funcao_atual.push(ASTItem::SSize),
                 "if" => funcao_atual.push(ASTItem::If),
+                "debugs" => funcao_atual.push(ASTItem::DebugS),
                 "true" => funcao_atual.push(ASTItem::True),
                 "false" => funcao_atual.push(ASTItem::False),
                 _ => funcao_atual.push(ASTItem::FuncCallNamed(nome.to_string())),
@@ -331,10 +337,6 @@ fn gerar_ast(tokens: Vec<Token>, funcao: bool) -> AST {
     // println!("ast: {ast:?}");
 
     ast
-}
-
-fn tokenizar_e_gerar_ast(entrada: &str, funcao: bool) -> AST {
-    gerar_ast(tokenizar(entrada), funcao)
 }
 
 // ---------- Interpretacao ----------
@@ -426,6 +428,19 @@ pub fn interpretar_func(estado: &mut PSFState, func: Func) {
                     }
                 }
             }
+            ASTItem::Input => {
+                let Some(item) = estado.stack.pop() else {
+                    log_error!("stack vaiz antes do input");
+                };
+                let Item::String(s) = item else {
+                    log_error!("input so aceita string como entrada");
+                };
+                print!("{}", s);
+                let mut input = String::new();
+                _ = io::stdout().flush();
+                io::stdin().read_line(&mut input).unwrap();
+                estado.stack.push(Item::String(input));
+            }
             ASTItem::Pop => {
                 _ = estado.stack.pop();
             }
@@ -499,6 +514,9 @@ pub fn interpretar_func(estado: &mut PSFState, func: Func) {
                     estado.stack.push(Item::Func(ff));
                 }
                 stack_consumir.push(ASTItem::FuncCallTop);
+            }
+            ASTItem::DebugS => {
+                println!("debug: {:?}", estado.stack);
             }
             ASTItem::FuncDef(f) => {
                 estado.stack.push(Item::Func(f));
@@ -577,15 +595,83 @@ impl PSFState {
     pub fn run_main(&mut self) {
         self.run_function("main");
     }
+
+    pub fn load_funcs(&mut self) {
+        self.funcoes
+            .insert("printp".to_owned(), vec![ASTItem::Print, ASTItem::Pop]);
+    }
 }
 
-// ---------- Main ----------
+// ---------- Helpers ----------
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let mut estado = PSFState::new();
+fn tokenizar_e_gerar_ast(entrada: &str, funcao: bool) -> AST {
+    gerar_ast(tokenizar(entrada), funcao)
+}
+
+fn print_usage() {
+    println!(
+        "[ARQUIVO | [OPCOES]*]
+OPCOES:
+    -h help
+    -i interativo"
+    );
+}
+
+fn print_usage_repl() {
+    println!(
+        "usagem
+    :h :help :?   print help
+    :e :exit      exit"
+    );
+}
+
+fn run(args: Vec<String>, estado: &mut PSFState) {
+    let mut tem_arq: Option<String> = None;
+    let mut repl = false;
+    let mut i = 1;
 
     if args.len() == 1 {
+        // print_usage();
+        // return;
+        repl = true;
+    }
+
+    while i < args.len() {
+        let arg = args[i].clone();
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return;
+            }
+            "-i" => {
+                repl = true;
+            }
+            outro => {
+                if let Ok(tem) = fs::exists(outro) {
+                    if tem {
+                        tem_arq = Some(arg.clone());
+                    }
+                } else {
+                    log_error!("arg nao reconhecido: {}", outro);
+                }
+            }
+        }
+        i += 1;
+    }
+    if let Some(arq) = tem_arq {
+        // ler arquivo
+        let conteudo = match fs::read_to_string(arq) {
+            Err(erro) => {
+                println!("Erro abrindo arquivo: {}", erro);
+                return;
+            }
+            Ok(str) => str,
+        };
+        estado.load_string(&conteudo);
+        estado.run_main();
+    }
+
+    if repl {
         // repl
         let mut input = String::new();
         loop {
@@ -595,6 +681,9 @@ fn main() {
             input = input.trim().to_owned();
 
             match input.as_str() {
+                ":h" | ":help" | ":?" => {
+                    print_usage_repl();
+                }
                 ":e" | ":exit" => {
                     return;
                 }
@@ -606,19 +695,15 @@ fn main() {
             }
             input.clear();
         }
-    } else if args.len() == 2 {
-        // ler arquivo
-        let conteudo = match fs::read_to_string(&args[1]) {
-            Err(erro) => {
-                println!("Erro abrindo arquivo: {}", erro);
-                return;
-            }
-            Ok(str) => str,
-        };
-        estado.load_string(&conteudo);
-        estado.run_main();
-    } else {
-        println!("3 nao existe");
-        return;
     }
+}
+
+// ---------- Main ----------
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let mut estado = PSFState::new();
+    estado.load_funcs();
+
+    run(args, &mut estado);
 }

@@ -1,0 +1,24 @@
+func = (
+    debugs
+	5 < print swap pop
+		?(
+		    1 + dup
+		    swapn print swap
+            func
+		)
+		?("pronto" print)
+	if
+)
+
+main = (
+	5 6 7 6 5
+	1 func
+)
+
+
+5 6 7 6 5 1       dup
+5 6 7 6 5 1 1     dup
+5 6 7 6 5 1 1 1   swapn
+5 6 7 6 1 5       print    -> 5
+5 6 7 6 1 5       swap
+5 6 7 6 5 1
